@@ -368,4 +368,5 @@ def api_replay():
 # -----------------------------
 if __name__ == "__main__":
     ensure_poller_started()
-    app.run(host=HOST, port=PORT, debug=False)
+    port = int(os.environ.get("PORT", str(PORT)))  # Render에서는 PORT env가 들어옴
+    app.run(host="0.0.0.0", port=port, debug=False)

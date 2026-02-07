@@ -12,6 +12,7 @@ function midnightMs(ms) {
 }
 
 function DeckCanvas() {
+  const API = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
   const baseDateMs = useMemo(() => midnightMs(Date.now()), []);
   const endDateMs = useMemo(() => baseDateMs + 24 * 3600 * 1000, [baseDateMs]);
 
@@ -29,7 +30,7 @@ function DeckCanvas() {
     let id;
     const load = async () => {
       try {
-        const res = await fetch("/api/segments", { cache: "no-store" });
+        const res = await fetch(`${API}/api/segments`, { cache: "no-store" });
         if (!res.ok) return;
         const data = await res.json();
         const segments = Array.isArray(data?.segments) ? data.segments : [];

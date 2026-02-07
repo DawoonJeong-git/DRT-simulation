@@ -93,6 +93,8 @@ function dedupeLayersById(layers) {
 }
 
 function CombinedView() {
+  const API = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+  
   const [viewState, setViewState] = useState(null);
 
   const [areaMode, setAreaMode] = useState("both");
@@ -175,7 +177,8 @@ function CombinedView() {
 
     const loadLive = async () => {
       try {
-        const res = await fetch("/api/segments", { cache: "no-store" });
+        console.log("[LIVE fetch]", { url: `${API}/api/segments`, baseDateMs, isLive });
+        const res = await fetch(`${API}/api/segments`, { cache: "no-store" });
         if (!res.ok) return;
 
         const json = await res.json();
@@ -209,15 +212,16 @@ function CombinedView() {
           vehicleType: r.vehicleType ?? r.vehicle_type,
         }));
         if (!cancelled) setRouteData(rd);
-      } catch {
-        // 조용히 무시
+      } catch (e) {
+        console.warn("[segments] load failed:", e);
       }
     };
 
     const loadReplayOnce = async () => {
       try {
         const dateStr = toDateStr(baseDateMs);
-        const res = await fetch(`/api/replay?date=${dateStr}`, { cache: "no-store" });
+        console.log("[REPLAY fetch]", { url: `${API}/api/replay?date=${dateStr}`, baseDateMs, isLive });
+        const res = await fetch(`${API}/api/replay?date=${dateStr}`, { cache: "no-store" });
         if (!res.ok) return;
 
         const json = await res.json();
@@ -240,8 +244,8 @@ function CombinedView() {
           vehicleType: r.vehicleType ?? r.vehicle_type,
         }));
         if (!cancelled) setRouteData(rd);
-      } catch {
-        // 조용히 무시
+      } catch (e) {
+        console.warn("[segments] load failed:", e);
       }
     };
 

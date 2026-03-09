@@ -140,6 +140,10 @@ function CombinedView() {
     }
   }, [isLive, setIsPlaying]);
 
+
+
+  const prevAreaModeRef = useRef(null);
+
   useEffect(() => {
     const s1 = window.__stationCoordsByServiceType?.[1] || {};
     const s2 = window.__stationCoordsByServiceType?.[2] || {};
@@ -149,6 +153,11 @@ function CombinedView() {
 
     const bounds = getBoundsFromCoordsMap(target);
     if (!bounds) return;
+
+    // ✅ 핵심: (1) viewState가 아직 없을 때는 반드시 1번 맞추고
+    //        (2) viewState가 이미 있으면 areaMode가 바뀔 때만 다시 맞춘다
+    const shouldFit = !viewState || prevAreaModeRef.current !== areaMode;
+    if (!shouldFit) return;
 
     const next = fitViewStateToBounds(bounds, {
       width: window.innerWidth,
@@ -163,7 +172,10 @@ function CombinedView() {
       pitch: prev?.pitch ?? 0,
       bearing: prev?.bearing ?? 0,
     }));
-  }, [stationCoords, areaMode]);
+
+    prevAreaModeRef.current = areaMode;
+  }, [stationCoords, areaMode, viewState]);
+
 
   const pad2 = (n) => String(n).padStart(2, "0");
   const toDateStr = (ms) => {

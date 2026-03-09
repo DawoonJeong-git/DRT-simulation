@@ -25,12 +25,11 @@ function pickRouteIdFromTrip(trip, operation_id) {
       null;
 
     if (c == null) continue;
-    if (operation_id != null && String(c) === String(operation_id)) continue; // ✅ 오염 제거
-    return c; // 첫 정상 후보
+    if (operation_id != null && String(c) === String(operation_id)) continue; // ✅ 오염값 제거
+    return c;
   }
   return null;
 }
-
 
 export function segmentsToRouteData(segments, baseMs, windowMs = 24 * 3600 * 1000) {
   const startMs = baseMs;
@@ -38,68 +37,138 @@ export function segmentsToRouteData(segments, baseMs, windowMs = 24 * 3600 * 100
   const SEC     = 1000;
   const totalSec = Math.round(windowMs / SEC);
 
-  // (1) 차량/운행 키로 그룹
+  // -----------------------------
+  // Polling-aware grouping:
+  //  1) group by vehicleID
+  //  2) within vehicle: group by operationID, compute operation span (s/e)
+  //  3) connected-components by span-overlap => drive (주행)
+  //  4) build ONE routeData row per (vehicleID, drive)
+  // -----------------------------
 
-  const byRunKey = new Map();
+  function intervalsOverlap(aS, aE, bS, bE) {
+    return (aS < bE) && (bS < aE);
+  }
+
+  function connectedComponentsOverlaps(items) {
+    const n = items.length;
+    if (n === 0) return [];
+    const adj = Array.from({ length: n }, () => []);
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        if (intervalsOverlap(items[i].s, items[i].e, items[j].s, items[j].e)) {
+          adj[i].push(j);
+          adj[j].push(i);
+        }
+      }
+    }
+    const comps = [];
+    const seen = new Array(n).fill(false);
+    for (let i = 0; i < n; i++) {
+      if (seen[i]) continue;
+      const stack = [i];
+      seen[i] = true;
+      const comp = [];
+      while (stack.length) {
+        const u = stack.pop();
+        comp.push(u);
+        for (const v of adj[u]) {
+          if (!seen[v]) {
+            seen[v] = true;
+            stack.push(v);
+          }
+        }
+      }
+      comps.push(comp);
+    }
+    return comps;
+  }
+
+  // (1) vehicleID로 먼저 그룹
+  const byVehicle = new Map();
   for (const s of (Array.isArray(segments) ? segments : [])) {
     const oid = s?.operationID;
     const vid = s?.vehicleID;
 
-    // vehicleID와 operationID 둘 다 없으면 차량 구분 불가 → 제외
     if (!oid || !vid) continue;
     if (s.originMs == null || s.destMs == null) continue;
     if (!Array.isArray(s.polyline) || s.polyline.length < 2) continue;
 
-    // ✅ 반드시 operationID + vehicleID 조합
-    const key = `${oid}|||${vid}`;
+    // 창과 겹치지 않으면 제외(성능/일관성)
+    if (s.originMs > endMs || s.destMs < startMs) continue;
 
-    if (!byRunKey.has(key)) byRunKey.set(key, []);
-    byRunKey.get(key).push(s);
+    if (!byVehicle.has(vid)) byVehicle.set(vid, []);
+    byVehicle.get(vid).push(s);
   }
 
   const vehiclesOut = [];
 
-  for (const [, segs0] of byRunKey) {
-    // (2) 창과 겹치는 세그먼트만, 운행 순으로 정렬
-    const segs = segs0
-      .filter(s => s.originMs <= endMs && s.destMs >= startMs)
-      .sort((a, b) => {
-        const ra = Number.isFinite(a.routeInfo) ? a.routeInfo : 0;
-        const rb = Number.isFinite(b.routeInfo) ? b.routeInfo : 0;
-        if (ra !== rb) return ra - rb;
-        if (a.originMs !== b.originMs) return (a.originMs || 0) - (b.originMs || 0);
-        return (a.destMs || 0) - (b.destMs || 0);
-      });
+  // (2) vehicle 단위 처리
+  for (const [vehicleID, segsAll0] of byVehicle) {
+    const segsAll = segsAll0.slice();
 
-    if (segs.length === 0) continue;
-
-    // (3) trip 분할
-    const trips = [];
-    let cur = [segs[0]];
-    for (let i = 1; i < segs.length; i++) {
-      const prev = segs[i - 1];
-      const next = segs[i];
-      const contiguous =
-        (next.routeInfo === (prev.routeInfo + 1)) &&
-        (prev.destStationID === next.originStationID) &&
-        ((next.originMs - prev.destMs) <= FIVE_MIN);
-      if (contiguous) cur.push(next);
-      else { trips.push(cur); cur = [next]; }
+    // operationID별 그룹
+    const byOp = new Map();
+    for (const s of segsAll) {
+      const opid = s.operationID;
+      if (!byOp.has(opid)) byOp.set(opid, []);
+      byOp.get(opid).push(s);
     }
-    trips.push(cur);
 
-    // (4) 각 trip을 절대초 타임라인에 매핑
-    for (const trip of trips) {
+    // operation span 계산 (scheduling의 total_s/total_e 역할)
+    const opItems = [];
+    for (const [opid, arr] of byOp) {
+      let sMin = Infinity, eMax = -Infinity;
+      for (const r of arr) {
+        sMin = Math.min(sMin, r.originMs);
+        eMax = Math.max(eMax, r.destMs);
+      }
+      const sC = Math.max(startMs, sMin);
+      const eC = Math.min(endMs, eMax);
+      if (eC <= sC) continue;
+      opItems.push({ s: sC, e: eC, opid });
+    }
+    if (opItems.length === 0) continue;
+
+    // (3) overlap 기반 drive(cluster) 생성
+    const comps = connectedComponentsOverlaps(opItems);
+
+    // 각 comp = drive 1개
+    comps.forEach((comp, driveIndex) => {
+      const opids = comp.map(i => opItems[i].opid);
+
+      // drive에 속한 모든 segment 수집
+      const driveSegs0 = [];
+      for (const opid of opids) {
+        const arr = byOp.get(opid) || [];
+        for (const s of arr) driveSegs0.push(s);
+      }
+
+      // 시간 우선 정렬 + routeInfo 보조
+      const driveSegs = driveSegs0
+        .filter(s => s.originMs <= endMs && s.destMs >= startMs)
+        .sort((a, b) => {
+          if (a.originMs !== b.originMs) return (a.originMs || 0) - (b.originMs || 0);
+          const ra = Number.isFinite(a.routeInfo) ? a.routeInfo : 0;
+          const rb = Number.isFinite(b.routeInfo) ? b.routeInfo : 0;
+          if (ra !== rb) return ra - rb;
+          return (a.destMs || 0) - (b.destMs || 0);
+        });
+
+      if (driveSegs.length === 0) return;
+
+      // ✅ drive 식별키: layer id 충돌 방지
+      const driveKey = `${vehicleID}|||drive-${driveIndex}`;
+
+      // (4) drive를 절대초 타임라인에 매핑 (기존 trip 로직을 drive 전체에 적용)
       const coords  = new Array(totalSec + 1).fill(null);
       const covered = new Array(totalSec + 1).fill(false);
 
-      for (let i = 0; i < trip.length; i++) {
-        const seg = trip[i];
+      for (let i = 0; i < driveSegs.length; i++) {
+        const seg = driveSegs[i];
         const poly = seg.polyline;
         const cum  = cumulativeDistances(poly);
         const tot  = cum[cum.length - 1] || 1;
 
-        // 경계 엄격화: 시작=출발 ‘이후’ 첫 초, 끝=도착 ‘이전’ 마지막 초
         const segS = seg.originMs;
         const segE = Math.min(seg.destMs, endMs);
         if (segE <= startMs || segE <= segS) continue;
@@ -110,6 +179,7 @@ export function segmentsToRouteData(segments, baseMs, windowMs = 24 * 3600 * 100
 
         for (let t = i0; t <= i1; t++) covered[t] = true;
 
+        // (중요) 같은 초가 중복 기록되면 '첫 값 유지'
         for (let t = i0; t <= i1; t++) {
           if (coords[t] != null) continue;
           const ms = startMs + t * SEC;
@@ -119,9 +189,9 @@ export function segmentsToRouteData(segments, baseMs, windowMs = 24 * 3600 * 100
         }
 
         // 연속(같은 정류장) + ≤5분이면 대기 좌표 유지
-        const next = trip[i + 1];
+        const next = driveSegs[i + 1];
         if (next &&
-            (next.routeInfo === seg.routeInfo + 1) &&
+            (next.routeInfo === (seg.routeInfo + 1)) &&
             (seg.destStationID === next.originStationID)) {
           const gapMs = next.originMs - seg.destMs;
           if (gapMs > 0 && gapMs <= FIVE_MIN) {
@@ -136,7 +206,7 @@ export function segmentsToRouteData(segments, baseMs, windowMs = 24 * 3600 * 100
         }
       }
 
-      // 세그먼트 ‘내부/대기’만 ffill — 운행 밖은 null 유지
+      // drive 내부/대기만 ffill — drive 밖은 null 유지
       let last = null;
       for (let i = 0; i < coords.length; i++) {
         if (!covered[i]) { last = null; continue; }
@@ -145,10 +215,10 @@ export function segmentsToRouteData(segments, baseMs, windowMs = 24 * 3600 * 100
       }
 
       // stops: 중간 정류장(첫 origin / 마지막 dest 제외)
-      const firstOrigin = normStopId(trip[0]?.originStationID);
-      const lastDest    = normStopId(trip[trip.length - 1]?.destStationID);
+      const firstOrigin = normStopId(driveSegs[0]?.originStationID);
+      const lastDest    = normStopId(driveSegs[driveSegs.length - 1]?.destStationID);
       const stationSet = new Set();
-      for (const seg of trip) {
+      for (const seg of driveSegs) {
         const o = normStopId(seg.originStationID);
         const d = normStopId(seg.destStationID);
         if (o && o !== firstOrigin) stationSet.add(o);
@@ -156,11 +226,9 @@ export function segmentsToRouteData(segments, baseMs, windowMs = 24 * 3600 * 100
       }
       const stops = Array.from(stationSet).map(id => ({ station: id }));
 
-      // 이벤트 타임라인(절대 ms) 생성
-      // seg.events는 스키마 A( pickup_total / dropoff_total ) 또는
-      // 스키마 B( origin.board / dest.alight )가 올 수 있음
+      // 이벤트 타임라인(절대 ms)
       const eventsTimeline = [];
-      for (const seg of trip) {
+      for (const seg of driveSegs) {
         const oId = normStopId(seg.originStationID);
         const dId = normStopId(seg.destStationID);
 
@@ -173,7 +241,9 @@ export function segmentsToRouteData(segments, baseMs, windowMs = 24 * 3600 * 100
         let p_down = Number(d.dropoff_total ?? 0);
         let w_down = to01(d.dropoff_wheelchair ?? 0);
 
-        const hasSchemaB = (o.board !== undefined) || (d.alight !== undefined) || (o.alight !== undefined) || (d.board !== undefined);
+        const hasSchemaB =
+          (o.board !== undefined) || (d.alight !== undefined) ||
+          (o.alight !== undefined) || (d.board !== undefined);
         if (hasSchemaB) {
           p_up   = Number(o.board?.passenger  ?? 0);
           w_up   = to01(o.board?.wheelchair   ?? 0);
@@ -184,7 +254,7 @@ export function segmentsToRouteData(segments, baseMs, windowMs = 24 * 3600 * 100
         eventsTimeline.push({
           ms: seg.originMs,
           station: oId,
-          phase: "depart",   
+          phase: "depart",
           pickup_total: p_up,
           pickup_wheelchair: w_up,
           dropoff_total: 0,
@@ -193,7 +263,7 @@ export function segmentsToRouteData(segments, baseMs, windowMs = 24 * 3600 * 100
         eventsTimeline.push({
           ms: seg.destMs,
           station: dId,
-          phase: "arrive",   
+          phase: "arrive",
           pickup_total: 0,
           pickup_wheelchair: 0,
           dropoff_total: p_down,
@@ -202,13 +272,13 @@ export function segmentsToRouteData(segments, baseMs, windowMs = 24 * 3600 * 100
       }
       eventsTimeline.sort((a,b)=>a.ms-b.ms);
 
-      // 온보드 배열(초 단위) 생성: 하차 즉시 감소, covered 밖은 0
+      // 온보드 배열(초 단위) — covered 밖은 0
       const onboardTotal = new Array(totalSec + 1).fill(0);
       const onboardWheel = new Array(totalSec + 1).fill(0);
 
-      const deltas = {}; // { idx: { tot: +/-, whl: +/0/- } }
+      const deltas = {};
       for (const ev of eventsTimeline) {
-        const idx = Math.floor((ev.ms - startMs) / SEC);  // ★ floor: 즉시 반영
+        const idx = Math.floor((ev.ms - startMs) / SEC);
         if (idx < 0 || idx > totalSec) continue;
         const whlDelta = to01(ev.pickup_wheelchair) - to01(ev.dropoff_wheelchair);
         const totDelta = (ev.pickup_total || 0)      - (ev.dropoff_total || 0);
@@ -217,47 +287,32 @@ export function segmentsToRouteData(segments, baseMs, windowMs = 24 * 3600 * 100
         deltas[idx].whl += whlDelta;
       }
 
-      // covered(운행/대기) 구간에서만 유효
       let curTot = 0, curWhl = 0;
       for (let i = 0; i <= totalSec; i++) {
         if (deltas[i]) {
           curTot += deltas[i].tot;
-          curWhl  = Math.max(0, Math.min(1, curWhl + deltas[i].whl)); // 휠 0/1 clamp
+          curWhl  = Math.max(0, Math.min(1, curWhl + deltas[i].whl));
           curTot  = Math.max(0, curTot);
         }
         onboardTotal[i] = covered[i] ? curTot : 0;
         onboardWheel[i] = covered[i] ? curWhl : 0;
       }
 
-      // 출력
-      const firstSeg = trip[0];
-
-      // ✅ grouping key는 내부에서만 사용 (필요하면 runKey로 보관)
-      const runKey = `${firstSeg.operationID}|||${firstSeg.vehicleID}`;
-
-
+      // 출력 (대표 segment 1개로 기존 UI 호환 유지)
+      const firstSeg = driveSegs[0];
       const operation_id = firstSeg.operationID ?? null;
       const vehicle_id   = firstSeg.vehicleID ?? null;
-
-      // route 후보 키를 넓게 (데이터마다 이름이 다를 수 있음)
-      const routeCandidate =
-        firstSeg.routeID ??
-        firstSeg.routeId ??
-        firstSeg.route_id ??
-        firstSeg.routeCode ??
-        firstSeg.route ??
-        null;
-
-      // ✅ route가 operation과 같으면(현재 네 증상), route는 없다고 보고 null 처리
-      const route_id = pickRouteIdFromTrip(trip, operation_id);
-
+      const route_id     = pickRouteIdFromTrip(driveSegs, operation_id);
       const vehicle_type = firstSeg.vehicleType || "car";
 
       vehiclesOut.push({
-        // (선택) runKey가 필요하면 남겨두기
-        runKey,
+        // ✅ drive 단위 key (VehicleLayer에서 path id 충돌 방지)
+        runKey: driveKey,
+        driveKey,
 
+        // 호환/표시용
         operation_id,
+        operation_ids: opids,
         vehicle_id,
         route_id,
         vehicle_type,
@@ -270,8 +325,7 @@ export function segmentsToRouteData(segments, baseMs, windowMs = 24 * 3600 * 100
         onboardTotal,
         onboardWheel,
       });
-
-    }
+    });
   }
 
   return vehiclesOut;

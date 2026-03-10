@@ -1,82 +1,30 @@
-// src/api/ganttApi.js
+FROM python:3.11-slim-bookworm
 
-const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
-// API contract (expected):
-// {
-//   date: "YYYY-MM-DD",
-//   updatedAtMs: number,
-//   timeWindow: { start: "08:00", end: "22:00", stepMin: 5 },
-//   vehicles: [{ vehicleID, vehicleType, operationServiceType }],
-//   intervals: [
-//     {
-//       vehicleID, operationID, status, startMs, endMs, laneIndex, laneCount, label,
-//       pickupStationID, dropoffStationID, pickupStationName, dropoffStationName, reserveType
-//     }
-//   ]
-// }
+WORKDIR /app
 
-function normalizePayload(raw) {
-  if (!raw || typeof raw !== "object") {
-    throw new Error("Invalid API response.");
-  }
+RUN apt-get update && apt-get install -y \
+    curl \
+    gnupg \
+    apt-transport-https \
+    ca-certificates \
+    unixodbc \
+    unixodbc-dev \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
 
-  const vehicles = Array.isArray(raw.vehicles) ? raw.vehicles : [];
-  const intervals = Array.isArray(raw.intervals) ? raw.intervals : [];
+RUN wget https://packages.microsoft.com/config/debian/12/packages-microsoft-prod.deb -O /tmp/packages-microsoft-prod.deb && \
+    dpkg -i /tmp/packages-microsoft-prod.deb && \
+    rm /tmp/packages-microsoft-prod.deb
 
-  return {
-    date: raw.date,
-    updatedAtMs: raw.updatedAtMs ?? Date.now(),
-    timeWindow: raw.timeWindow ?? { start: "08:00", end: "22:00", stepMin: 5 },
+RUN apt-get update && ACCEPT_EULA=Y apt-get install -y msodbcsql18 && \
+    rm -rf /var/lib/apt/lists/*
 
-    vehicles: vehicles.map((v) => ({
-      vehicleID: String(v.vehicleID ?? ""),
-      vehicleType: v.vehicleType ?? "",
-      operationServiceType: v.operationServiceType ?? ""
-    })),
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-    intervals: intervals.map((it) => ({
-      vehicleID: String(it.vehicleID ?? ""),
-      operationID: it.operationID ?? null,
-      status: it.status ?? "MOVING",
-      startMs: Number(it.startMs),
-      endMs: Number(it.endMs),
-      laneIndex: Number.isFinite(it.laneIndex) ? it.laneIndex : 0,
-      laneCount: Number.isFinite(it.laneCount) && it.laneCount > 0 ? it.laneCount : 1,
-      label: it.label ?? "",
+COPY . .
 
-      reserveType: it.reserveType ?? "",
-      pickupStationID: it.pickupStationID ?? "",
-      dropoffStationID: it.dropoffStationID ?? "",
-      pickupStationName: it.pickupStationName ?? "",
-      dropoffStationName: it.dropoffStationName ?? ""
-    }))
-  };
-}
-
-function buildApiUrl(path) {
-  if (!path.startsWith("/")) {
-    throw new Error(`API path must start with "/": ${path}`);
-  }
-  return API_BASE ? `${API_BASE}${path}` : path;
-}
-
-export async function fetchGantt(date, { signal } = {}) {
-  const url = buildApiUrl(`/api/gantt?date=${encodeURIComponent(date)}`);
-
-  const resp = await fetch(url, {
-    method: "GET",
-    signal,
-    headers: {
-      Accept: "application/json"
-    }
-  });
-
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => "");
-    throw new Error(`API error (${resp.status}): ${text || resp.statusText}`);
-  }
-
-  const json = await resp.json();
-  return normalizePayload(json);
-}
+CMD ["gunicorn", "server:app", "--bind", "0.0.0.0:10000"]

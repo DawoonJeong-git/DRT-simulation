@@ -32,9 +32,9 @@ DB_NAME = os.getenv("DB_NAME", "hdl")
 # Azure SQL config
 # --------------------------------------------------
 
-AZURE_DB_USER = os.getenv("AZURE_DB_USER", "drt-kaist@drt-kaist")
+AZURE_DB_USER = os.getenv("AZURE_DB_USER", "drt-kaist")
 AZURE_DB_PASS = os.getenv("AZURE_DB_PASS", "hdl3644@")
-AZURE_DB_SERVER = os.getenv("AZURE_DB_SERVER", "drt-kaist.database.windows.net")
+AZURE_DB_SERVER = os.getenv("AZURE_DB_SERVER", "drt-kaist-2.database.windows.net")
 AZURE_DB_PORT = int(os.getenv("AZURE_DB_PORT", "1433"))
 AZURE_DB_NAME = os.getenv("AZURE_DB_NAME", "HDL")
 AZURE_DB_DRIVER = os.getenv("AZURE_DB_DRIVER", "{ODBC Driver 18 for SQL Server}")

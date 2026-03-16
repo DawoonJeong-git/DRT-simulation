@@ -94,7 +94,7 @@ function dedupeLayersById(layers) {
 
 function CombinedView() {
   const API = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
-  
+
   const [viewState, setViewState] = useState(null);
 
   const [areaMode, setAreaMode] = useState("both");
@@ -126,11 +126,31 @@ function CombinedView() {
   const [liveStats, setLiveStats] = useState({ lastFetch: null, len: 0, updatedAtMs: null });
   const livePrevSigRef = useRef({ len: 0, updatedAtMs: null });
 
+  const [garageId, setGarageId] = useState(null);
+
   const stationCoords = useStationCoords();
   const deckRef = useRef(null);
 
   useLayoutEffect(() => {
     window.setHoverInfo = setHoverInfo;
+  }, []);
+
+  // ✅ garage.json은 1회만 로드
+  useEffect(() => {
+    let cancelled = false;
+
+    fetch("/garage.json")
+      .then((res) => res.json())
+      .then((json) => {
+        if (!cancelled) setGarageId(json?.garageStationId ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setGarageId(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -139,8 +159,6 @@ function CombinedView() {
       setIsPlaying(false);
     }
   }, [isLive, setIsPlaying]);
-
-
 
   const prevAreaModeRef = useRef(null);
 
@@ -154,8 +172,6 @@ function CombinedView() {
     const bounds = getBoundsFromCoordsMap(target);
     if (!bounds) return;
 
-    // ✅ 핵심: (1) viewState가 아직 없을 때는 반드시 1번 맞추고
-    //        (2) viewState가 이미 있으면 areaMode가 바뀔 때만 다시 맞춘다
     const shouldFit = !viewState || prevAreaModeRef.current !== areaMode;
     if (!shouldFit) return;
 
@@ -175,7 +191,6 @@ function CombinedView() {
 
     prevAreaModeRef.current = areaMode;
   }, [stationCoords, areaMode, viewState]);
-
 
   const pad2 = (n) => String(n).padStart(2, "0");
   const toDateStr = (ms) => {
@@ -266,7 +281,6 @@ function CombinedView() {
         await loadLive();
         timer = setInterval(loadLive, 60_000);
       } else {
-        // replay는 1회 로드(파일 생성/폴링 없음)
         await loadReplayOnce();
       }
     };
@@ -278,19 +292,30 @@ function CombinedView() {
     };
   }, [baseDateMs, isLive]);
 
+  // ✅ 핵심 수정:
+  // 1) async 제거
+  // 2) viewport 대신 viewState 직접 전달
+  // 3) viewState 변경(=줌/팬/회전)에도 레이어 재계산
   useEffect(() => {
-    const updateLayers = async () => {
-      const viewport = deckRef.current?.deck?.getViewports?.()[0];
-      const layers = await getVehicleLayers(filteredRouteData, elapsedTime, stationCoords, viewport);
-      setDeckLayers(layers);
-    };
+    const layers = getVehicleLayers(
+      filteredRouteData,
+      elapsedTime,
+      stationCoords,
+      viewState,
+      garageId
+    );
 
-    if (filteredRouteData.length > 0 && stationCoords && Object.keys(stationCoords).length > 0) {
-      updateLayers();
+    if (
+      filteredRouteData.length > 0 &&
+      stationCoords &&
+      Object.keys(stationCoords).length > 0 &&
+      viewState
+    ) {
+      setDeckLayers(layers);
     } else {
       setDeckLayers([]);
     }
-  }, [elapsedTime, filteredRouteData, stationCoords]);
+  }, [elapsedTime, filteredRouteData, stationCoords, viewState, garageId]);
 
   if (!viewState) {
     return (

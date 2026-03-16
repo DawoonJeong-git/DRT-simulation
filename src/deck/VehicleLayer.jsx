@@ -1,5 +1,4 @@
-// src/deck/VehicleLayer.jsx
-import { PathLayer, IconLayer, ScatterplotLayer } from "@deck.gl/layers";
+import { PathLayer, IconLayer } from "@deck.gl/layers";
 
 // ---------- helpers ----------
 function isPt(p) {
@@ -80,7 +79,6 @@ export function getVehicleLayers(routeData, elapsedTime, stationCoords = {}, vie
 
   const vehicles = [];
   const stationIcons = [];
-  const statusDots = [];
 
   const VEHICLE_ICON = {
     basePx: 30,
@@ -190,22 +188,7 @@ export function getVehicleLayers(routeData, elapsedTime, stationCoords = {}, vie
       startTime: "00:00:00",
     });
 
-    // ✅ 상태점 위치 계산:
-    // viewport.project/unproject 대신 줌 기반 간단 오프셋 사용
-    // 장점: 줌 변경 시 바로 다시 계산되고, 비동기 꼬임 없음
-    if (pos) {
-      const now = performance.now();
-      const blink = Math.floor((now / 500) % 2) === 0 ? 255 : 50;
-
-      const lonOffset = 0.00001 * (vehicleIconPxNow / 20) / Math.pow(2, (zNow - 13) * 0.6);
-      const latOffset = 0.00001 * (vehicleIconPxNow / 20) / Math.pow(2, (zNow - 13) * 0.6);
-
-      statusDots.push({
-        position: [pos[0] + lonOffset, pos[1] + latOffset],
-        color: [0, 100, 255, blink],
-      });
-    }
-
+  
     const nowMs = (typeof v.baseMs === "number" ? v.baseMs : 0) + Math.floor(rel) * 1000;
     const evs = Array.isArray(v.eventsTimeline) ? v.eventsTimeline : [];
 
@@ -301,19 +284,6 @@ export function getVehicleLayers(routeData, elapsedTime, stationCoords = {}, vie
       })
     );
   }
-
-  overlayLayers.push(
-    new ScatterplotLayer({
-      id: "status-dots",
-      data: statusDots,
-      getPosition: (d) => d.position,
-      getFillColor: (d) => d.color,
-      getRadius: 3,
-      radiusMinPixels: 3,
-      pickable: false,
-      parameters: { depthTest: false },
-    })
-  );
 
   return [...pathLayers, ...overlayLayers];
 }

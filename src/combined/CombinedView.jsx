@@ -362,30 +362,6 @@ function CombinedView() {
         />
       </div>
 
-      {isLive && !hideUI && (
-        <div
-          style={{
-            position: "absolute",
-            top: 12,
-            right: 12,
-            zIndex: 2000,
-            background: "rgba(0,0,0,0.65)",
-            color: "#fff",
-            padding: "8px 10px",
-            borderRadius: 8,
-            fontFamily: "monospace",
-            fontSize: 12,
-            lineHeight: 1.4,
-            minWidth: 180,
-          }}
-        >
-          <div style={{ fontWeight: 700 }}>LIVE</div>
-          <div>fetch: {liveStats.lastFetch ? new Date(liveStats.lastFetch).toLocaleTimeString() : "-"}</div>
-          <div>segments: {liveStats.len}</div>
-          <div>updatedAt: {liveStats.updatedAtMs ? new Date(liveStats.updatedAtMs).toLocaleString() : "-"}</div>
-        </div>
-      )}
-
       <AreaModeToggle
         areaMode={areaMode}
         setAreaMode={setAreaMode}
@@ -394,28 +370,49 @@ function CombinedView() {
         hideUI={hideUI}
       />
 
+
       {!hideUI && (
-        <div style={{ position: "absolute", bottom: 20, left: "50%", transform: "translateX(-50%)", zIndex: 1000 }}>
-          <PlaybackController
-            elapsedTime={elapsedTime}
-            setElapsedTime={setElapsedTime}
-            isPlaying={isPlaying}
-            setIsPlaying={setIsPlaying}
-            speed={speed}
-            setSpeed={setSpeed}
-            baseDateMs={baseDateMs}
-            setBaseDateMs={setBaseDateMs}
-            isLive={isLive}
-            setIsLive={setIsLive}
-          />
+        <div
+          style={{
+            position: "absolute",
+            bottom: 20,
+            left: 16,
+            right: 16,
+            zIndex: 1000,
+            display: "flex",
+            justifyContent: "center",
+            overflowX: "auto",
+            overflowY: "hidden",
+            pointerEvents: "auto",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              minWidth: "max-content",
+              whiteSpace: "nowrap",
+            }}
+          >
+            <PlaybackController
+              elapsedTime={elapsedTime}
+              setElapsedTime={setElapsedTime}
+              isPlaying={isPlaying}
+              setIsPlaying={setIsPlaying}
+              speed={speed}
+              setSpeed={setSpeed}
+              baseDateMs={baseDateMs}
+              setBaseDateMs={setBaseDateMs}
+              isLive={isLive}
+              setIsLive={setIsLive}
+            />
+
+            <RecordingController setHideUI={setHideUI} />
+          </div>
         </div>
       )}
 
-      {!hideUI && (
-        <div style={{ position: "absolute", bottom: 20, right: 20, zIndex: 1000 }}>
-          <RecordingController setHideUI={setHideUI} />
-        </div>
-      )}
 
       {hoverInfo?.type === "station" && (
         <StationInfoBox

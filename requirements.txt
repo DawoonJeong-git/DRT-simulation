@@ -6,4 +6,3 @@ osmnx
 pytz
 pymysql
 gunicorn
-pyodbc

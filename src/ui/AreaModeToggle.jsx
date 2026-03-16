@@ -9,6 +9,8 @@ const BTN_BASE = {
   cursor: "pointer",
   fontSize: 13,
   background: "rgba(0,0,0,0.35)",
+  flexShrink: 0,
+  whiteSpace: "nowrap",
 };
 
 
@@ -21,7 +23,20 @@ function AreaModeToggle({ areaMode, setAreaMode, coverageVisible, setCoverageVis
   });
 
   return (
-    <div style={{ position: "absolute", top: 16, left: 16, zIndex: 1200, display: "flex", gap: 8 }}>
+    <div
+      style={{
+        position: "absolute",
+        top: 16,
+        left: 16,
+        right: 16,
+        zIndex: 1200,
+        display: "flex",
+        gap: 8,
+        overflowX: "auto",
+        overflowY: "hidden",
+        whiteSpace: "nowrap",
+      }}
+    >
       <button style={btnStyle(areaMode === "both")} onClick={() => setAreaMode("both")}>
         전체
       </button>

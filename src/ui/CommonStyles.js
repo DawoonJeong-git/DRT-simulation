@@ -12,7 +12,7 @@ export const controlBoxStyle = {
   alignItems: "center",
   gap: "10px",
   fontSize: "14px",
-  overflow: "hidden",
+  flexShrink: 0,
 };
 
 export const darkButtonStyle = {

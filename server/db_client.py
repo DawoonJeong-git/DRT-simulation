@@ -1,62 +1,84 @@
 # db_client.py
-# FINAL VERSION — MariaDB + Azure SQL dual support with visible console debug logs
+# FINAL VERSION — MariaDB (local db_config + Render env fallback)
 
 import os
 import pymysql
-import pyodbc
 from contextlib import contextmanager
 
 # --------------------------------------------------
-# Engine switch
+# DB profile selection
 # --------------------------------------------------
 
-DB_ENGINE = os.getenv("DB_ENGINE", "azure").lower()
-# "azure" | "mysql"
-
-
-def _is_azure():
-    return DB_ENGINE in {"azure", "sqlserver", "mssql"}
-
+PROFILE_NAME = "hdl"      # "nzero" or "hdl"
 
 # --------------------------------------------------
-# MariaDB config
+# Load config: local(db_config.py) first, then Render env fallback
 # --------------------------------------------------
 
-DB_USER = os.getenv("DB_USER", "root")
-DB_PASS = os.getenv("DB_PASS", "3644")
-DB_HOST = os.getenv("DB_HOST", "143.248.121.90")
-DB_PORT = int(os.getenv("DB_PORT", "3306"))
-DB_NAME = os.getenv("DB_NAME", "hdl")
+DB = None
+
+try:
+    from db_config import DB_CONFIGS  # local only
+
+    if PROFILE_NAME in DB_CONFIGS:
+        DB = DB_CONFIGS[PROFILE_NAME]
+        print(f"[DB INIT] Using local db_config.py | PROFILE={PROFILE_NAME}")
+    else:
+        raise KeyError(f"PROFILE_NAME '{PROFILE_NAME}' not found in DB_CONFIGS")
+
+except Exception as e:
+    print(f"[DB INIT] Local db_config.py unavailable or invalid: {e}")
+    print(f"[DB INIT] Falling back to environment variables | PROFILE={PROFILE_NAME}")
+
+    if PROFILE_NAME == "nzero":
+        DB = {
+            "host": os.getenv("NZERO_DB_HOST"),
+            "port": int(os.getenv("NZERO_DB_PORT", "3306")),
+            "user": os.getenv("NZERO_DB_USER"),
+            "password": os.getenv("NZERO_DB_PASSWORD"),
+            "database": os.getenv("NZERO_DB_NAME"),
+            "charset": "utf8mb4",
+            "use_unicode": True,
+        }
+
+    elif PROFILE_NAME == "hdl":
+        DB = {
+            "host": os.getenv("HDL_DB_HOST"),
+            "port": int(os.getenv("HDL_DB_PORT", "3306")),
+            "user": os.getenv("HDL_DB_USER"),
+            "password": os.getenv("HDL_DB_PASSWORD"),
+            "database": os.getenv("HDL_DB_NAME"),
+            "charset": "utf8mb4",
+            "use_unicode": True,
+        }
+
+    else:
+        raise ValueError(f"Unsupported PROFILE_NAME: {PROFILE_NAME}")
 
 # --------------------------------------------------
-# Azure SQL config
+# Final DB vars
 # --------------------------------------------------
 
-AZURE_DB_USER = os.getenv("AZURE_DB_USER", "drt-kaist")
-AZURE_DB_PASS = os.getenv("AZURE_DB_PASS", "hdl3644@")
-AZURE_DB_SERVER = os.getenv("AZURE_DB_SERVER", "drt-kaist-2.database.windows.net")
-AZURE_DB_PORT = int(os.getenv("AZURE_DB_PORT", "1433"))
-AZURE_DB_NAME = os.getenv("AZURE_DB_NAME", "HDL")
-AZURE_DB_DRIVER = os.getenv("AZURE_DB_DRIVER", "{ODBC Driver 18 for SQL Server}")
-AZURE_DB_ENCRYPT = os.getenv("AZURE_DB_ENCRYPT", "yes")
-AZURE_DB_TRUST_SERVER_CERT = os.getenv("AZURE_DB_TRUST_SERVER_CERT", "no")
+DB_HOST = DB["host"]
+DB_PORT = DB["port"]
+DB_USER = DB["user"]
+DB_PASS = DB["password"]
+DB_DATABASE = DB["database"]
 
-# --------------------------------------------------
-# module-load debug: import만 되어도 바로 보임
-# --------------------------------------------------
+if not all([DB_HOST, DB_PORT, DB_USER, DB_PASS, DB_DATABASE]):
+    raise ValueError(
+        f"[DB INIT ERROR] Missing DB config values for PROFILE={PROFILE_NAME}. "
+        f"Check db_config.py or Render environment variables."
+    )
 
-if _is_azure():
-    print(f"[DB INIT] USING AZURE SQL | server={AZURE_DB_SERVER} | db={AZURE_DB_NAME}")
-else:
-    print(f"[DB INIT] USING MARIADB | host={DB_HOST}:{DB_PORT} | db={DB_NAME}")
-
+print(f"[DB INIT] PROFILE={PROFILE_NAME} | host={DB_HOST}:{DB_PORT} | db={DB_DATABASE}")
 
 # --------------------------------------------------
 # SQL helpers
 # --------------------------------------------------
 
 def _placeholder():
-    return "?" if _is_azure() else "%s"
+    return "%s"
 
 
 def _placeholders(n):
@@ -64,18 +86,12 @@ def _placeholders(n):
 
 
 def _cast_bigint(expr):
-    if _is_azure():
-        return f"TRY_CAST({expr} AS BIGINT)"
     return f"CAST({expr} AS UNSIGNED)"
 
 
 def _qualify(table, alias=None):
     alias_sql = f" {alias}" if alias else ""
-
-    if _is_azure():
-        return f"[dbo].[{table}]{alias_sql}"
-
-    return f"{DB_NAME}.{table}{alias_sql}"
+    return f"{DB_DATABASE}.{table}{alias_sql}"
 
 
 # --------------------------------------------------
@@ -84,35 +100,19 @@ def _qualify(table, alias=None):
 
 @contextmanager
 def connect():
-    if _is_azure():
-        print(f"[DB CONNECT] AZURE SQL | server={AZURE_DB_SERVER} | db={AZURE_DB_NAME}")
+    print(f"[DB CONNECT] PROFILE={PROFILE_NAME} | host={DB_HOST}:{DB_PORT} | db={DB_DATABASE}")
 
-        conn_str = (
-            f"DRIVER={AZURE_DB_DRIVER};"
-            f"SERVER={AZURE_DB_SERVER},{AZURE_DB_PORT};"
-            f"DATABASE={AZURE_DB_NAME};"
-            f"UID={AZURE_DB_USER};"
-            f"PWD={AZURE_DB_PASS};"
-            f"Encrypt={AZURE_DB_ENCRYPT};"
-            f"TrustServerCertificate={AZURE_DB_TRUST_SERVER_CERT};"
-        )
-        con = pyodbc.connect(conn_str)
-        con.autocommit = True
-
-    else:
-        print(f"[DB CONNECT] MARIADB | host={DB_HOST}:{DB_PORT} | db={DB_NAME}")
-
-        con = pymysql.connect(
-            user=DB_USER,
-            passwd=DB_PASS,
-            host=DB_HOST,
-            port=DB_PORT,
-            db=DB_NAME,
-            charset="utf8mb4",
-            use_unicode=True,
-            cursorclass=pymysql.cursors.DictCursor,
-            autocommit=True,
-        )
+    con = pymysql.connect(
+        user=DB_USER,
+        passwd=DB_PASS,
+        host=DB_HOST,
+        port=DB_PORT,
+        db=DB_DATABASE,
+        charset=DB["charset"],
+        use_unicode=DB["use_unicode"],
+        cursorclass=pymysql.cursors.DictCursor,
+        autocommit=True,
+    )
 
     try:
         yield con
@@ -132,12 +132,6 @@ def fetchall(sql, args=None):
         cur = con.cursor()
         try:
             cur.execute(sql, args or ())
-
-            if _is_azure():
-                columns = [c[0] for c in cur.description]
-                rows = cur.fetchall()
-                return [dict(zip(columns, row)) for row in rows]
-
             return cur.fetchall()
         finally:
             cur.close()

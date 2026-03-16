@@ -18,7 +18,7 @@ PROFILE_NAME = "hdl"      # "nzero" or "hdl"
 DB = None
 
 try:
-    from db_config import DB_CONFIGS  # local only
+    from .db_config import DB_CONFIGS  # local only
 
     if PROFILE_NAME in DB_CONFIGS:
         DB = DB_CONFIGS[PROFILE_NAME]

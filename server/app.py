@@ -9,7 +9,7 @@ from flask import Flask, jsonify, request
 import pytz
 
 # reuse your existing DB access layer
-from db_client import get_routes_for_day, get_reservations_by_dispatch
+from .db_client import get_routes_for_day, get_reservations_by_dispatch
 
 KST = pytz.timezone("Asia/Seoul")
 

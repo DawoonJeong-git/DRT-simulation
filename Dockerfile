@@ -5,9 +5,11 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY server/requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
-COPY . .
+COPY . /app
+
+WORKDIR /app/server
 
 CMD gunicorn server.app:app --bind 0.0.0.0:$PORT

@@ -1,82 +1,38 @@
-# db_client.py
-# FINAL VERSION — MariaDB (local db_config + Render env fallback)
-
+from dotenv import load_dotenv
 import os
 import pymysql
 from contextlib import contextmanager
 
 # --------------------------------------------------
-# DB profile selection
+# ENV LOAD
 # --------------------------------------------------
-
-PROFILE_NAME = "hdl"      # "nzero" or "hdl"
-
-# --------------------------------------------------
-# Load config: local(db_config.py) first, then Render env fallback
-# --------------------------------------------------
-
-DB = None
-
-try:
-    from .db_config import DB_CONFIGS  # local only
-
-    if PROFILE_NAME in DB_CONFIGS:
-        DB = DB_CONFIGS[PROFILE_NAME]
-        print(f"[DB INIT] Using local db_config.py | PROFILE={PROFILE_NAME}")
-    else:
-        raise KeyError(f"PROFILE_NAME '{PROFILE_NAME}' not found in DB_CONFIGS")
-
-except Exception as e:
-    print(f"[DB INIT] Local db_config.py unavailable or invalid: {e}")
-    print(f"[DB INIT] Falling back to environment variables | PROFILE={PROFILE_NAME}")
-
-    if PROFILE_NAME == "nzero":
-        DB = {
-            "host": os.getenv("NZERO_DB_HOST"),
-            "port": int(os.getenv("NZERO_DB_PORT", "3306")),
-            "user": os.getenv("NZERO_DB_USER"),
-            "password": os.getenv("NZERO_DB_PASSWORD"),
-            "database": os.getenv("NZERO_DB_NAME"),
-            "charset": "utf8mb4",
-            "use_unicode": True,
-        }
-
-    elif PROFILE_NAME == "hdl":
-        DB = {
-            "host": os.getenv("HDL_DB_HOST"),
-            "port": int(os.getenv("HDL_DB_PORT", "3306")),
-            "user": os.getenv("HDL_DB_USER"),
-            "password": os.getenv("HDL_DB_PASSWORD"),
-            "database": os.getenv("HDL_DB_NAME"),
-            "charset": "utf8mb4",
-            "use_unicode": True,
-        }
-
-    else:
-        raise ValueError(f"Unsupported PROFILE_NAME: {PROFILE_NAME}")
+load_dotenv()
 
 # --------------------------------------------------
-# Final DB vars
+# DB CONFIG (.env only)
 # --------------------------------------------------
+DB_HOST = os.getenv("DB_HOST")
+DB_PORT = int(os.getenv("DB_PORT", "3306"))
+DB_USER = os.getenv("DB_USER")
+DB_PASS = os.getenv("DB_PASSWORD")
+DB_DATABASE = os.getenv("DB_NAME")
 
-DB_HOST = DB["host"]
-DB_PORT = DB["port"]
-DB_USER = DB["user"]
-DB_PASS = DB["password"]
-DB_DATABASE = DB["database"]
+print(f"[DB INIT] host={DB_HOST}:{DB_PORT} db={DB_DATABASE}")
 
-if not all([DB_HOST, DB_PORT, DB_USER, DB_PASS, DB_DATABASE]):
-    raise ValueError(
-        f"[DB INIT ERROR] Missing DB config values for PROFILE={PROFILE_NAME}. "
-        f"Check db_config.py or Render environment variables."
-    )
+required_env = {
+    "DB_HOST": DB_HOST,
+    "DB_USER": DB_USER,
+    "DB_PASSWORD": DB_PASS,
+    "DB_NAME": DB_DATABASE,
+}
+missing = [k for k, v in required_env.items() if not v]
+if missing:
+    raise RuntimeError(f"Missing required DB env vars: {', '.join(missing)}")
 
-print(f"[DB INIT] PROFILE={PROFILE_NAME} | host={DB_HOST}:{DB_PORT} | db={DB_DATABASE}")
 
 # --------------------------------------------------
 # SQL helpers
 # --------------------------------------------------
-
 def _placeholder():
     return "%s"
 
@@ -97,37 +53,59 @@ def _qualify(table, alias=None):
 # --------------------------------------------------
 # Connection
 # --------------------------------------------------
-
-@contextmanager
-def connect():
-    print(f"[DB CONNECT] PROFILE={PROFILE_NAME} | host={DB_HOST}:{DB_PORT} | db={DB_DATABASE}")
-
-    con = pymysql.connect(
-        user=DB_USER,
-        passwd=DB_PASS,
+def get_connection():
+    return pymysql.connect(
         host=DB_HOST,
         port=DB_PORT,
-        db=DB_DATABASE,
-        charset=DB["charset"],
-        use_unicode=DB["use_unicode"],
+        user=DB_USER,
+        password=DB_PASS,
+        database=DB_DATABASE,
+        charset="utf8mb4",
         cursorclass=pymysql.cursors.DictCursor,
         autocommit=True,
     )
 
+
+@contextmanager
+def get_cursor():
+    conn = get_connection()
     try:
-        yield con
+        cursor = conn.cursor()
+        yield cursor
     finally:
-        con.close()
+        cursor.close()
+        conn.close()
+
+
+@contextmanager
+def connect():
+    print(f"[DB CONNECT] host={DB_HOST}:{DB_PORT} db={DB_DATABASE}")
+    conn = get_connection()
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 # --------------------------------------------------
 # Query execution
 # --------------------------------------------------
+def query(sql, params=None):
+    print("[DB QUERY]", sql.strip().split()[0] if sql.strip() else "EMPTY")
+    with get_cursor() as cur:
+        cur.execute(sql, params or ())
+        return cur.fetchall()
+
+
+def execute(sql, params=None):
+    with get_cursor() as cur:
+        cur.execute(sql, params or ())
+        return cur.rowcount
+
 
 def fetchall(sql, args=None):
     first_line = sql.strip().splitlines()[0] if sql.strip() else ""
     print(f"[DB QUERY] {first_line[:120]}")
-
     with connect() as con:
         cur = con.cursor()
         try:
@@ -137,10 +115,20 @@ def fetchall(sql, args=None):
             cur.close()
 
 
-# --------------------------------------------------
-# Queries
-# --------------------------------------------------
+def test_connection():
+    with connect() as con:
+        cur = con.cursor()
+        try:
+            cur.execute("SELECT 1 AS ok")
+            row = cur.fetchone()
+            return bool(row and row.get("ok") == 1)
+        finally:
+            cur.close()
 
+
+# --------------------------------------------------
+# Project queries
+# --------------------------------------------------
 def get_operation_map():
     operation_tbl = _qualify("operation")
 
@@ -153,7 +141,8 @@ def get_operation_map():
         str(r["operationID"]).strip(): {
             "vehicleID": r["vehicleID"],
             "VehicleType": r["VehicleType"],
-        } for r in rows
+        }
+        for r in rows
     }
 
 
@@ -177,7 +166,8 @@ def get_reservations_by_dispatch(dispatch_ids):
     reservation_tbl = _qualify("reservation_request")
     ph = _placeholders(len(cleaned))
 
-    rows = fetchall(f"""
+    rows = fetchall(
+        f"""
         SELECT
             dispatchID,
             passengerCount,
@@ -186,7 +176,9 @@ def get_reservations_by_dispatch(dispatch_ids):
             dropoffStationID
         FROM {reservation_tbl}
         WHERE dispatchID IN ({ph})
-    """, cleaned)
+    """,
+        cleaned,
+    )
 
     return {r["dispatchID"]: r for r in rows}
 
@@ -225,11 +217,11 @@ def get_routes_for_day(date_yyyymmdd: int):
         r.destGetoffPxIDs,
         r.routeCode,
         o.VehicleType AS vehicleType,
-        o.vehicleID   AS op_vehicleID
+        o.vehicleID AS op_vehicleID
     FROM {route_tbl}
     JOIN {operation_tbl}
       ON o.operationID = r.operationID
-     AND o.vehicleID   = r.vehicleID
+     AND o.vehicleID = r.vehicleID
     WHERE {cast_origin} BETWEEN {ph} AND {ph}
     ORDER BY r.operationID, r.routeInfo, r.routeSeq
     """
@@ -267,11 +259,11 @@ def get_routes_since(ts_cursor: int):
         r.destGetoffPxIDs,
         r.routeCode,
         o.VehicleType AS vehicleType,
-        o.vehicleID   AS op_vehicleID
+        o.vehicleID AS op_vehicleID
     FROM {route_tbl}
     JOIN {operation_tbl}
       ON o.operationID = r.operationID
-     AND o.vehicleID   = r.vehicleID
+     AND o.vehicleID = r.vehicleID
     WHERE {cast_origin} > {ph}
        OR {cast_dest} > {ph}
     ORDER BY r.operationID, r.routeInfo, r.routeSeq

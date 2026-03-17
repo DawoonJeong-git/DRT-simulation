@@ -6,3 +6,4 @@ osmnx
 pytz
 pymysql
 gunicorn
+python-dotenv

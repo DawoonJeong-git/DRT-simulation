@@ -1,28 +1,27 @@
-# dependencies
+# Node / Vite
 node_modules/
-
-# build output
 dist/
-
-# vite cache
 .vite/
 
-# environment variables
+# Environment files
 .env
 .env.*
+!.env.example
+!server/.env.example
 
 # Python cache
 __pycache__/
 *.pyc
-*.pyo
+*.pyoa
 *.pyd
 
-# virtual environment
+# Virtual env
 venv/
+.venv/
 
-# logs
+# Logs
 *.log
 
-# OS files
+# OS / editor
 .DS_Store
 Thumbs.db

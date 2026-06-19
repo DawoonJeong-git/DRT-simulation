@@ -13,6 +13,7 @@ import { VehicleInfoBox } from "../ui/VehicleInfoBox";
 import PlaybackController from "../ui/PlaybackController";
 import RecordingController from "../ui/RecordingController";
 import AreaModeToggle from "../ui/AreaModeToggle";
+import { isActiveRouteStatus } from "../utils/routeStatus.js";
 
 function midnight(ms) {
   const d = new Date(ms);
@@ -210,7 +211,7 @@ function CombinedView() {
 
         const json = await res.json();
         const rawSegments = Array.isArray(json?.segments) ? json.segments : [];
-        const segments = rawSegments.map(normalizeSegment);
+        const segments = rawSegments.filter(isActiveRouteStatus).map(normalizeSegment);
 
         setLiveStats({
           lastFetch: Date.now(),
@@ -253,7 +254,7 @@ function CombinedView() {
 
         const json = await res.json();
         const rawSegments = Array.isArray(json?.segments) ? json.segments : [];
-        const segments = rawSegments.map(normalizeSegment);
+        const segments = rawSegments.filter(isActiveRouteStatus).map(normalizeSegment);
 
         const start = baseDateMs;
         const end = baseDateMs + 24 * 3600 * 1000;

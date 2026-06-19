@@ -50,6 +50,11 @@ def _qualify(table, alias=None):
     return f"{DB_DATABASE}.{table}{alias_sql}"
 
 
+def _active_route_status_clause(alias="r"):
+    status_expr = f"CAST({alias}.routeStatus AS UNSIGNED)"
+    return f"({alias}.routeStatus IS NULL OR {status_expr} < 400 OR {status_expr} >= 500)"
+
+
 # --------------------------------------------------
 # Connection
 # --------------------------------------------------
@@ -133,14 +138,14 @@ def get_operation_map():
     operation_tbl = _qualify("operation")
 
     rows = fetchall(f"""
-        SELECT operationID, vehicleID, VehicleType
+        SELECT operationID, vehicleID, vehicleType
         FROM {operation_tbl}
     """)
 
     return {
         str(r["operationID"]).strip(): {
             "vehicleID": r["vehicleID"],
-            "VehicleType": r["VehicleType"],
+            "vehicleType": r["vehicleType"],
         }
         for r in rows
     }
@@ -215,14 +220,15 @@ def get_routes_for_day(date_yyyymmdd: int):
         r.originGetoffPxIDs,
         r.destBoardingPxIDs,
         r.destGetoffPxIDs,
-        r.routeCode,
-        o.VehicleType AS vehicleType,
+        r.routeStatus,
+        o.vehicleType AS vehicleType,
         o.vehicleID AS op_vehicleID
     FROM {route_tbl}
     JOIN {operation_tbl}
       ON o.operationID = r.operationID
      AND o.vehicleID = r.vehicleID
     WHERE {cast_origin} BETWEEN {ph} AND {ph}
+      AND {_active_route_status_clause("r")}
     ORDER BY r.operationID, r.routeInfo, r.routeSeq
     """
     return fetchall(sql, (start, end))
@@ -257,15 +263,18 @@ def get_routes_since(ts_cursor: int):
         r.originGetoffPxIDs,
         r.destBoardingPxIDs,
         r.destGetoffPxIDs,
-        r.routeCode,
-        o.VehicleType AS vehicleType,
+        r.routeStatus,
+        o.vehicleType AS vehicleType,
         o.vehicleID AS op_vehicleID
     FROM {route_tbl}
     JOIN {operation_tbl}
       ON o.operationID = r.operationID
      AND o.vehicleID = r.vehicleID
-    WHERE {cast_origin} > {ph}
-       OR {cast_dest} > {ph}
+    WHERE (
+        {cast_origin} > {ph}
+        OR {cast_dest} > {ph}
+    )
+      AND {_active_route_status_clause("r")}
     ORDER BY r.operationID, r.routeInfo, r.routeSeq
     """
     return fetchall(sql, (ts_cursor, ts_cursor))

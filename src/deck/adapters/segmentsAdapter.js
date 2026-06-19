@@ -1,5 +1,6 @@
 // /SRC/deck/adapters/segmentsAdapter.js
 import { cumulativeDistances, interpolateAlong } from "../utils/interp.js";
+import { isActiveRouteStatus } from "../../utils/routeStatus.js";
 
 // 정류장 ID 정규화: 대문자 + 선행 'S' 제거
 function normStopId(x) {
@@ -86,6 +87,8 @@ export function segmentsToRouteData(segments, baseMs, windowMs = 24 * 3600 * 100
   // (1) vehicleID로 먼저 그룹
   const byVehicle = new Map();
   for (const s of (Array.isArray(segments) ? segments : [])) {
+    if (!isActiveRouteStatus(s)) continue;
+
     const oid = s?.operationID;
     const vid = s?.vehicleID;
 

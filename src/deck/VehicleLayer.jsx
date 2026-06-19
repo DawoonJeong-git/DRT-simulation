@@ -42,6 +42,22 @@ function compactPath(arr) {
   }
   return out;
 }
+function normStationId(x) {
+  return String(x ?? "").trim().replace(/^S/i, "").toUpperCase();
+}
+function getStationCoord(stationCoords, id) {
+  if (!id) return null;
+  const plain = normStationId(id);
+  const withPrefix = `S${plain}`;
+  return (
+    stationCoords[id] ||
+    stationCoords[plain] ||
+    stationCoords[withPrefix] ||
+    stationCoords[plain.toUpperCase()] ||
+    stationCoords[withPrefix.toUpperCase()] ||
+    null
+  );
+}
 
 // ---------- zoom scaling helpers ----------
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -188,32 +204,25 @@ export function getVehicleLayers(routeData, elapsedTime, stationCoords = {}, vie
       startTime: "00:00:00",
     });
 
-  
     const nowMs = (typeof v.baseMs === "number" ? v.baseMs : 0) + Math.floor(rel) * 1000;
     const evs = Array.isArray(v.eventsTimeline) ? v.eventsTimeline : [];
+    const upcomingStationIds = new Set();
 
-    const normStation = (x) => String(x ?? "").trim().replace(/^S/i, "").toUpperCase();
+    for (const ev of evs) {
+      if (!ev || typeof ev.ms !== "number" || ev.ms < nowMs) continue;
+      const id = normStationId(ev.station);
+      if (id) upcomingStationIds.add(id);
+    }
 
-    for (const s of stops || []) {
-      const id = s?.station;
-      if (!id) continue;
+    if (evs.length === 0) {
+      for (const s of stops || []) {
+        const id = normStationId(s?.station);
+        if (id) upcomingStationIds.add(id);
+      }
+    }
 
-      const want = normStation(id);
-
-      const hasFutureEvent = evs.some((ev) => {
-        if (!ev) return false;
-        if (normStation(ev.station) !== want) return false;
-        return typeof ev.ms === "number" && ev.ms >= nowMs;
-      });
-
-      if (!hasFutureEvent) continue;
-
-      const coord =
-        stationCoords[id] ||
-        stationCoords["S" + id] ||
-        stationCoords[id?.toUpperCase?.()] ||
-        stationCoords[("S" + id)?.toUpperCase?.()];
-
+    for (const id of upcomingStationIds) {
+      const coord = getStationCoord(stationCoords, id);
       if (coord) stationIcons.push({ stationId: id, position: coord, icon: "/station.png" });
     }
   }

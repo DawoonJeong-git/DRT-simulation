@@ -133,6 +133,7 @@ def build_segments(routes: List[Dict[str, Any]], reserv: Dict[str, Dict[str, Any
                 "vehicleID": vehicle_id,
                 "vehicleType": r.get("vehicleType"),
                 "routeInfo": safe_int(r.get("routeInfo"), 0),
+                "routeStatus": r.get("routeStatus"),
                 "originStationID": origin_sid,
                 "originDeptTime": r.get("originDeptTime"),
                 "destStationID": dest_sid,

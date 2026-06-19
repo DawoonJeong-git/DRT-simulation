@@ -4,6 +4,7 @@ import DeckGL from "@deck.gl/react";
 import { getVehicleLayers } from "./VehicleLayer";
 import { segmentsToRouteData } from "./adapters/segmentsAdapter";
 import { useStationCoords } from "./useStationCoords";
+import { isActiveRouteStatus } from "../utils/routeStatus";
 
 function midnightMs(ms) {
   const d = new Date(ms);
@@ -33,7 +34,7 @@ function DeckCanvas() {
         const res = await fetch(`${API}/api/segments`, { cache: "no-store" });
         if (!res.ok) return;
         const data = await res.json();
-        const segments = Array.isArray(data?.segments) ? data.segments : [];
+        const segments = (Array.isArray(data?.segments) ? data.segments : []).filter(isActiveRouteStatus);
 
         const filtered = segments.filter((s) => s?.originMs >= baseDateMs && s?.originMs < endDateMs);
         const rd = segmentsToRouteData(filtered, baseDateMs);

@@ -4,7 +4,7 @@ export function isInactiveRouteStatus(status) {
   const numericStatus = Number(status);
   if (!Number.isFinite(numericStatus)) return false;
 
-  return numericStatus >= 400 && numericStatus < 500;
+  return numericStatus === 4 || (numericStatus >= 400 && numericStatus < 500);
 }
 
 export function isActiveRouteStatus(routeOrStatus) {

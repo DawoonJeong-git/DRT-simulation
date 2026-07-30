@@ -2,6 +2,7 @@ from dotenv import load_dotenv
 import os
 import pymysql
 from contextlib import contextmanager
+from functools import lru_cache
 
 # --------------------------------------------------
 # ENV LOAD
@@ -50,9 +51,26 @@ def _qualify(table, alias=None):
     return f"{DB_DATABASE}.{table}{alias_sql}"
 
 
+@lru_cache(maxsize=None)
+def _table_columns(table):
+    rows = fetchall(f"SHOW COLUMNS FROM {_qualify(table)}")
+    return {str(r.get("Field", "")).strip() for r in rows}
+
+
+def _select_optional_column(table, alias, column):
+    if column in _table_columns(table):
+        return f"{alias}.{column} AS {column}"
+    return f"NULL AS {column}"
+
+
 def _active_route_status_clause(alias="r"):
     status_expr = f"CAST({alias}.routeStatus AS UNSIGNED)"
-    return f"({alias}.routeStatus IS NULL OR {status_expr} < 400 OR {status_expr} >= 500)"
+    return f"({alias}.routeStatus IS NULL OR ({status_expr} <> 4 AND ({status_expr} < 400 OR {status_expr} >= 500)))"
+
+
+def _active_operation_status_clause(alias="o"):
+    status_expr = f"CAST({alias}.operationStatus AS UNSIGNED)"
+    return f"({alias}.operationStatus IS NULL OR {status_expr} <> 4)"
 
 
 # --------------------------------------------------
@@ -207,7 +225,9 @@ def get_routes_for_day(date_yyyymmdd: int):
         r.vehicleID,
         r.routeInfo,
         r.linkIDs,
+        {_select_optional_column("route", "r", "updatedLinkIDs")},
         r.NodeIDs,
+        {_select_optional_column("route", "r", "updatedNodeIDs")},
         r.originStationID,
         {cast_origin} AS originDeptTime,
         r.destStationID,
@@ -215,7 +235,9 @@ def get_routes_for_day(date_yyyymmdd: int):
         r.onboardingNum,
         r.dispatchIDs,
         r.lon,
+        {_select_optional_column("route", "r", "updatedLon")},
         r.lat,
+        {_select_optional_column("route", "r", "updatedLat")},
         r.originBoardingPxIDs,
         r.originGetoffPxIDs,
         r.destBoardingPxIDs,
@@ -229,6 +251,7 @@ def get_routes_for_day(date_yyyymmdd: int):
      AND o.vehicleID = r.vehicleID
     WHERE {cast_origin} BETWEEN {ph} AND {ph}
       AND {_active_route_status_clause("r")}
+      AND {_active_operation_status_clause("o")}
     ORDER BY r.operationID, r.routeInfo, r.routeSeq
     """
     return fetchall(sql, (start, end))
@@ -250,7 +273,9 @@ def get_routes_since(ts_cursor: int):
         r.vehicleID,
         r.routeInfo,
         r.linkIDs,
+        {_select_optional_column("route", "r", "updatedLinkIDs")},
         r.NodeIDs,
+        {_select_optional_column("route", "r", "updatedNodeIDs")},
         r.originStationID,
         {cast_origin} AS originDeptTime,
         r.destStationID,
@@ -258,7 +283,9 @@ def get_routes_since(ts_cursor: int):
         r.onboardingNum,
         r.dispatchIDs,
         r.lon,
+        {_select_optional_column("route", "r", "updatedLon")},
         r.lat,
+        {_select_optional_column("route", "r", "updatedLat")},
         r.originBoardingPxIDs,
         r.originGetoffPxIDs,
         r.destBoardingPxIDs,
@@ -275,6 +302,7 @@ def get_routes_since(ts_cursor: int):
         OR {cast_dest} > {ph}
     )
       AND {_active_route_status_clause("r")}
+      AND {_active_operation_status_clause("o")}
     ORDER BY r.operationID, r.routeInfo, r.routeSeq
     """
     return fetchall(sql, (ts_cursor, ts_cursor))

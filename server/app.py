@@ -51,7 +51,20 @@ def to_polyline(lon_list, lat_list) -> List[List[float]]:
     lats = parse_list(lat_list)
     if len(lons) != len(lats) or len(lons) < 2:
         return []
-    return [[float(lon), float(lat)] for lon, lat in zip(lons, lats)]
+    points: List[List[float]] = []
+    for lon, lat in zip(lons, lats):
+        try:
+            points.append([float(lon), float(lat)])
+        except Exception:
+            continue
+    return points if len(points) >= 2 else []
+
+
+def active_polyline(r: Dict[str, Any]) -> List[List[float]]:
+    updated = to_polyline(r.get("updatedLon"), r.get("updatedLat"))
+    if updated:
+        return updated
+    return to_polyline(r.get("lon"), r.get("lat"))
 
 
 def to_epoch_ms(x) -> int | None:
@@ -113,7 +126,8 @@ def build_segments(routes: List[Dict[str, Any]], reserv: Dict[str, Dict[str, Any
         dispatch_ids = parse_list(r.get("dispatchIDs"))
         origin_sid = r.get("originStationID")
         dest_sid = r.get("destStationID")
-        poly = to_polyline(r.get("lon"), r.get("lat"))
+        poly = active_polyline(r)
+        active_link_ids = parse_list(r.get("updatedLinkIDs")) or parse_list(r.get("linkIDs"))
         res_list = [reserv.get(did) for did in dispatch_ids if reserv.get(did)]
 
         pickup_total = sum(
@@ -141,6 +155,7 @@ def build_segments(routes: List[Dict[str, Any]], reserv: Dict[str, Dict[str, Any
                 "originMs": to_epoch_ms(r.get("originDeptTime")),
                 "destMs": to_epoch_ms(r.get("destDeptTime")),
                 "polyline": poly,
+                "linkIDs": active_link_ids,
                 "dispatchIDs": dispatch_ids,
                 "events": {
                     "origin": {

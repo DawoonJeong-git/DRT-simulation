@@ -11,8 +11,6 @@ function to01(x) {
   return (x === 1 || x === true || x === "1") ? 1 : 0;
 }
 
-const FIVE_MIN = 5 * 60 * 1000; // 5분(ms)
-
 function pickRouteIdFromTrip(trip, operation_id) {
   // trip 내 모든 segment에서 route 후보를 긁어오고,
   // operation_id와 동일한 값(오염값)은 버린다.
@@ -30,6 +28,12 @@ function pickRouteIdFromTrip(trip, operation_id) {
     return c;
   }
   return null;
+}
+
+function sameStopId(a, b) {
+  const aa = normStopId(a);
+  const bb = normStopId(b);
+  return !!aa && !!bb && aa === bb;
 }
 
 export function segmentsToRouteData(segments, baseMs, windowMs = 24 * 3600 * 1000) {
@@ -191,15 +195,19 @@ export function segmentsToRouteData(segments, baseMs, windowMs = 24 * 3600 * 100
           if (pt) coords[t] = pt;
         }
 
-        // 연속(같은 정류장) + ≤5분이면 대기 좌표 유지
+        // 연속(같은 정류장)이면 다음 출발 전까지 대기 좌표 유지
         const next = driveSegs[i + 1];
-        if (next &&
-            (next.routeInfo === (seg.routeInfo + 1)) &&
-            (seg.destStationID === next.originStationID)) {
+        if (next && sameStopId(seg.destStationID, next.originStationID)) {
           const gapMs = next.originMs - seg.destMs;
-          if (gapMs > 0 && gapMs <= FIVE_MIN) {
-            const endIdx  = Math.floor((Math.min(seg.destMs, endMs) - startMs) / SEC);
-            const nextIdx = Math.ceil((Math.max(next.originMs, startMs) - startMs) / SEC);
+          if (gapMs > 0) {
+            const endIdx = Math.max(
+              0,
+              Math.floor((Math.min(seg.destMs, endMs) - startMs) / SEC)
+            );
+            const nextIdx = Math.min(
+              totalSec + 1,
+              Math.ceil((Math.max(next.originMs, startMs) - startMs) / SEC)
+            );
             const endPt   = interpolateAlong(poly, cum, tot * 1.0);
             for (let t = endIdx + 1; t < nextIdx; t++) {
               covered[t] = true;

@@ -172,12 +172,21 @@ export function segmentsToRouteData(segments, baseMs, windowMs = 24 * 3600 * 100
 
       for (let i = 0; i < driveSegs.length; i++) {
         const seg = driveSegs[i];
+        const next = driveSegs[i + 1];
         const poly = seg.polyline;
         const cum  = cumulativeDistances(poly);
         const tot  = cum[cum.length - 1] || 1;
 
         const segS = seg.originMs;
-        const segE = Math.min(seg.destMs, endMs);
+        let segE = Math.min(seg.destMs, endMs);
+        if (segE <= segS) {
+          const nextStart = next?.originMs;
+          const fallbackE =
+            Number.isFinite(nextStart) && nextStart > segS
+              ? nextStart
+              : segS + SEC;
+          segE = Math.min(fallbackE, endMs);
+        }
         if (segE <= startMs || segE <= segS) continue;
 
         const i0 = Math.ceil((segS - startMs) / SEC);
@@ -190,13 +199,12 @@ export function segmentsToRouteData(segments, baseMs, windowMs = 24 * 3600 * 100
         for (let t = i0; t <= i1; t++) {
           if (coords[t] != null) continue;
           const ms = startMs + t * SEC;
-          const p  = Math.min(1, Math.max(0, (ms - seg.originMs) / Math.max(1, seg.destMs - seg.originMs)));
+          const p  = Math.min(1, Math.max(0, (ms - seg.originMs) / Math.max(1, segE - seg.originMs)));
           const pt = interpolateAlong(poly, cum, tot * p);
           if (pt) coords[t] = pt;
         }
 
         // 연속(같은 정류장)이면 다음 출발 전까지 대기 좌표 유지
-        const next = driveSegs[i + 1];
         if (next && sameStopId(seg.destStationID, next.originStationID)) {
           const gapMs = next.originMs - seg.destMs;
           if (gapMs > 0) {
